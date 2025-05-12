@@ -1,0 +1,19 @@
+[package]
+name = "vulkan_test"
+version = "0.1.0"
+edition = "2024"
+links = "macos"
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+cgmath = "0.18"
+png = "0.17"
+pretty_env_logger = "0.5"
+thiserror = "1"
+tobj = { version = "4", features = ["log"] }
+vulkanalia = { version = "=0.28.0", features = ["libloading", "provisional", "window"] }
+winit = "0.29"
+
+#[target.build.macos]
+#rustc-link-search = ["/usr/local/lib"]
