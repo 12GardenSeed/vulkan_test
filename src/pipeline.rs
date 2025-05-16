@@ -140,9 +140,7 @@ impl EnginePipeline {
 }
 
 
-unsafe fn create_descriptor_set_layout(device: &vulkanalia::Device) -> a
-
-nyhow::Result<(vk::DescriptorSetLayout)> {
+unsafe fn create_descriptor_set_layout(device: &vulkanalia::Device) -> anyhow::Result<(vk::DescriptorSetLayout)> {
     let ubo_binding = vk::DescriptorSetLayoutBinding::builder()
         .binding(0)
         .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
