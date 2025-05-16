@@ -5,6 +5,9 @@
     clippy::unnecessary_wraps
 )]
 
+mod render_object;
+mod pipeline;
+
 use anyhow::{anyhow, Result};
 use cgmath::{point3, vec2, vec3, Deg};
 use log::*;
@@ -153,16 +156,16 @@ impl App {
         pick_physical_device(&instance, &mut data)?;
         let device = create_logical_device(&entry, &instance, &mut data)?;
 
-        create_swapchain(&window, &instance, &device, &mut data);
-        create_swapchain_image_views(&device, &mut data);
+        create_swapchain(&window, &instance, &device, &mut data)?;
+        create_swapchain_image_views(&device, &mut data)?;
         create_render_pass(&instance, &device, &mut data)?;
         create_descriptor_set_layout(&device, &mut data)?;
         // TODO multi
         create_pipeline(&device, &mut data)?;
 
-        create_command_pool(&instance, &device, &mut data);
+        create_command_pool(&instance, &device, &mut data)?;
         create_depth_objects(&instance, &device, &mut data)?;
-        create_framebuffers(&device, &mut data);
+        create_framebuffers(&device, &mut data)?;
         // TODO multi
         create_texture_image(&instance, &device, &mut data)?;
         create_texture_image_view(&device, &mut data)?;
@@ -174,7 +177,7 @@ impl App {
         create_uniform_buffers(&instance, &device, &mut data)?;
         create_descriptor_pool(&device, &mut data)?;
         create_descriptor_sets(&device, &mut data)?;
-        create_command_buffers(&device, &mut data);
+        create_command_buffers(&device, &mut data)?;
 
         create_sync_objects(&device, &mut data)?;
         Ok(Self {
@@ -404,6 +407,7 @@ struct AppData {
     surface: vk::SurfaceKHR,
     swapchain: vk::SwapchainKHR,
     render_pass: vk::RenderPass,
+    
     pipeline: vk::Pipeline,
 
     command_pool: vk::CommandPool,
