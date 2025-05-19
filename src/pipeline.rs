@@ -1,4 +1,4 @@
-use crate::{AppData, Vertex};
+use crate::{RenderApp, AppData, Vertex, create_texture_image_view, create_image_view};
 use vulkanalia::vk;
 use vulkanalia::vk::{DeviceV1_0, Instance};
 use vulkanalia::bytecode::Bytecode;
@@ -7,27 +7,31 @@ use vulkanalia::prelude::v1_0::*;
 use anyhow::{ Result };
 use vulkanalia::vk::{KhrSurfaceExtension, KhrSwapchainExtension, Pipeline};
 
-#[derive(Clone, Debug)]
-struct EnginePipeline {
+#[derive(Debug)]
+pub struct EnginePipeline {
+    // render_server:
     pipeline: vk::Pipeline,
-    vec_vertex:Vec<Vertex>,
-    vec_index:Vec<u32>,
+    pub vec_vertex:Vec<Vertex>,
+    pub vec_index:Vec<u32>,
     // // TODO 不是pipeline内置的结构，放到更合理的位置
     // // pipeline当此运行绑定的纹理
-    vec_image: Vec<vk::Image>,
-    descriptor_pool: vk::DescriptorPool,
+    pub vec_image: Vec<vk::Image>,
+    pub vec_image_view: Vec<vk::ImageView>,
+    pub descriptor_pool: vk::DescriptorPool,
+    pub descriptor_set_layout: vk::DescriptorSetLayout,
+    pub pipeline_layout: vk::PipelineLayout,
 }
 
-impl EnginePipeline {
-    pub fn new(device: &Device, descriptor_pool: vk::DescriptorPool, instance: Instance, data: &mut AppData) -> Result<(Self)> {
+impl <'a>EnginePipeline {
+    pub fn new(app:&'a mut RenderApp) -> Result<(Self)> {
         let vert = include_bytes!("../assets/ShaderOut/vert.spv");
         let frag = include_bytes!("../assets/ShaderOut/frag.spv");
 
         let vert_module = unsafe {
-            create_shader_module(device, &vert[..])
+            create_shader_module(&app.device, &vert[..])
         }?;
         let frag_module = unsafe {
-            create_shader_module(device, &frag[..])
+            create_shader_module(&app.device, &frag[..])
         }?;
         let vert_stage = vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::VERTEX)
@@ -49,13 +53,13 @@ impl EnginePipeline {
         let viewport = vk::Viewport::builder()
             .x(0.0)
             .y(0.0)
-            .width(data.swapchain_extent.width as f32)
-            .height(data.swapchain_extent.height as f32)
+            .width(app.data.swapchain_extent.width as f32)
+            .height(app.data.swapchain_extent.height as f32)
             .min_depth(0.0)
             .max_depth(1.0);
         let scissor = vk::Rect2D::builder()
             .offset(vk::Offset2D { x: 0, y: 0 })
-            .extent(data.swapchain_extent);
+            .extent(app.data.swapchain_extent);
         let viewports = &[viewport];
         let scissors = &[scissor];
         let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
@@ -87,11 +91,13 @@ impl EnginePipeline {
             .logic_op(vk::LogicOp::COPY)
             .attachments(attachments)
             .blend_constants([1.0, 0.0, 0.0, 0.0]);
-
-        let set_layouts = &[data.descriptor_set_layout];
+        let descriptor_set_layout = unsafe{
+            create_descriptor_set_layout(&app.device)
+        }?;
+        let set_layouts = &[descriptor_set_layout];
         let layout_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(set_layouts);
         let pipeline_layout = unsafe {
-            device.create_pipeline_layout(&layout_info, None)
+            app.device.create_pipeline_layout(&layout_info, None)
         }?;
 
         let stages = &[vert_stage, frag_stage];
@@ -115,27 +121,59 @@ impl EnginePipeline {
             .multisample_state(&multisample_state)
             .depth_stencil_state(&depth_stencil_state)
             .color_blend_state(&color_blend_state)
-            .layout(data.pipeline_layout)
-            .render_pass(data.render_pass)
+            .layout(pipeline_layout)
+            .render_pass(app.data.render_pass)
             .subpass(0);
         let pipeline = unsafe {
-            device
+            app.device
                 .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
                 .0[0]
         };
+        let descriptor_pool = app.data.descriptor_pool;
         unsafe {
-            device.destroy_shader_module(vert_module, None);
-            device.destroy_shader_module(frag_module, None);
+            &app.device.destroy_shader_module(vert_module, None);
+            &app.device.destroy_shader_module(frag_module, None);
         }
         Ok(
             Self {
                 pipeline,
                 descriptor_pool,
+                descriptor_set_layout,
+                pipeline_layout,
                 vec_index: vec![],
                 vec_vertex: vec![],
                 vec_image: vec![],
+                vec_image_view: vec![],
             }
         )
+    }
+    pub fn update_texture_vec(&mut self, app: &RenderApp, vec_image: Vec<Vec<u8>>, width: u32, height: u32) -> Result<()> {
+        self.vec_image.clear();
+        self.vec_image_view.clear();
+        vec_image
+            .iter()
+            .for_each(|vv| {
+                self.vec_image.push(unsafe {
+                    let (image, _) = app.create_texture_image(vv, width, height).unwrap();
+                    image
+                })
+            });
+        self.vec_image
+            .iter()
+            .for_each(|image| {
+                self.vec_image_view.push(unsafe {
+                    create_image_view(
+                        &app.device,
+                        *image,
+                        vk::Format::R8G8B8A8_SRGB,
+                        vk::ImageAspectFlags::COLOR,
+                    ).unwrap()
+                })
+            });
+        Ok(())
+    }
+    pub fn pipeline(&self) -> vk::Pipeline {
+        self.pipeline
     }
 }
 

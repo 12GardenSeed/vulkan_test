@@ -8,6 +8,7 @@
 mod render_object;
 mod pipeline;
 
+use pipeline::{EnginePipeline};
 use anyhow::{anyhow, Result};
 use cgmath::{point3, vec2, vec3, Deg};
 use log::*;
@@ -68,15 +69,15 @@ extern "system" fn debug_callback(
 ) -> vk::Bool32 {
     let data = unsafe { *data };
     let message = unsafe { CStr::from_ptr(data.message) }.to_str().unwrap();
-    // if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::ERROR {
-    //     error!("({:?}) {}", type_, message);
-    // } else if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::WARNING {
-    //     warn!("({:?}) {}", type_, message);
-    // } else if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::INFO {
-    //     debug!("({:?}) {}", type_, message);
-    // } else {
-    //     trace!("({:?}) {}", type_, message);
-    // }
+    if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::ERROR {
+        error!("({:?}) {}", type_, message);
+    } else if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::WARNING {
+        warn!("({:?}) {}", type_, message);
+    } else if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::INFO {
+        debug!("({:?}) {}", type_, message);
+    } else {
+        trace!("({:?}) {}", type_, message);
+    }
 
     vk::FALSE
 }
@@ -94,7 +95,11 @@ fn main() -> Result<()> {
 
     // App
 
-    let mut app = unsafe { App::create(&window)? };
+    let mut app = unsafe {
+        let mut  app = RenderApp::create(&window)?;
+        app.create_pipelines();
+        app
+    };
     let mut minimized = false;
     event_loop.run(move |event, elwt| {
         match event {
@@ -103,7 +108,7 @@ fn main() -> Result<()> {
             Event::WindowEvent { event, .. } => match event {
                 // Render a frame if our Vulkan app is not being destroyed.
                 WindowEvent::RedrawRequested if !elwt.exiting() && !minimized => {
-                    unsafe { app.render(&window) }.unwrap()
+                    // unsafe { app.render(&window) }.unwrap()
                 }
                 // Destroy our Vulkan app.
                 WindowEvent::CloseRequested => {
@@ -133,8 +138,8 @@ fn main() -> Result<()> {
 }
 
 /// Our Vulkan app.
-#[derive(Clone, Debug)]
-struct App {
+#[derive(Debug)]
+struct RenderApp {
     entry: Entry,
     instance: Instance,
     data: AppData,
@@ -144,7 +149,7 @@ struct App {
     start: Instant,
 }
 
-impl App {
+impl <'a>RenderApp {
     /// Creates our Vulkan app.
     unsafe fn create(window: &Window) -> Result<Self> {
         let loader = LibloadingLoader::new(LIBRARY)?;
@@ -161,14 +166,14 @@ impl App {
         create_render_pass(&instance, &device, &mut data)?;
         create_descriptor_set_layout(&device, &mut data)?;
         // TODO multi
-        create_pipeline(&device, &mut data)?;
+
 
         create_command_pool(&instance, &device, &mut data)?;
         create_depth_objects(&instance, &device, &mut data)?;
         create_framebuffers(&device, &mut data)?;
         // TODO multi
-        create_texture_image(&instance, &device, &mut data)?;
-        create_texture_image_view(&device, &mut data)?;
+        // create_texture_image(&instance, &device, &mut data)?;
+        // create_texture_image_view(&device, &mut data)?;
         create_texture_sampler(&device, &mut data)?;
         // TODO update in render time
         load_model(&mut data)?;
@@ -198,7 +203,7 @@ impl App {
         create_swapchain(window, &self.instance, &self.device, &mut self.data)?;
         create_swapchain_image_views(&self.device, &mut self.data)?;
         create_render_pass(&self.instance, &self.device, &mut self.data)?;
-        create_pipeline(&self.device, &mut self.data)?;
+        // create_pipeline(&self.device, &mut self.data)?;
         create_uniform_buffers(&self.instance, &self.device, &mut self.data)?;
         create_descriptor_pool(&self.device, &mut self.data)?;
         create_descriptor_sets(&self.device, &mut self.data)?;
@@ -213,6 +218,7 @@ impl App {
     /// Renders a frame for our Vulkan app.
     unsafe fn render(&mut self, window: &Window) -> Result<()> {
         self.frame = (self.frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        // update_render_descriptor_sets(&self.device, &mut self.data)?;
         self.device.wait_for_fences(
             &[self.data.in_flight_fences[self.frame]],
             true,
@@ -290,6 +296,29 @@ impl App {
         Ok(())
     }
 
+    unsafe fn create_pipelines(&mut self) -> Result<()> {
+
+        let vert = include_bytes!("../assets/ShaderOut/vert.spv");
+        let frag = include_bytes!("../assets/ShaderOut/frag.spv");
+
+        let image = File::open("./assets/resources/obj/test/viking_room.png")?;
+
+        let decoder = png::Decoder::new(image);
+        let mut reader = decoder.read_info()?;
+        let mut pixels = vec![0; reader.info().raw_bytes()];
+        reader.next_frame(&mut pixels)?;
+        let size = reader.info().raw_bytes() as u64;
+        let (width, height) = reader.info().size();
+        self.data.pipeline_current_index = 0;
+        let mut pipeline = EnginePipeline::new(self)?;
+
+        pipeline.update_texture_vec(&self, vec![pixels], width, height)?;
+        self.data.pipeline_vec.push(pipeline);
+        update_render_descriptor_sets(&self.device, &mut self.data)?;
+        bind_render_commands(&self.device, &mut self.data)?;
+        Ok(())
+    }
+
     unsafe fn destroy(&mut self) {
         self.destroy_swapchain();
         self.device.destroy_buffer(self.data.vertex_buffer, None);
@@ -324,7 +353,7 @@ impl App {
             .for_each(|f| self.device.destroy_framebuffer(*f, None));
         self.device
             .free_command_buffers(self.data.command_pool, &self.data.command_buffers);
-        self.device.destroy_pipeline(self.data.pipeline, None);
+        // self.device.destroy_pipeline(self.data.pipeline, None);
         self.device
             .destroy_pipeline_layout(self.data.pipeline_layout, None);
         self.device.destroy_render_pass(self.data.render_pass, None);
@@ -396,10 +425,53 @@ impl App {
 
         Ok(())
     }
+
+    unsafe fn create_texture_image(&self, buffer: &Vec<u8>, width: u32, height: u32) -> Result<(vk::Image, vk::DeviceMemory)> {
+        create_texture_image_from_pixel_vec(
+            &self.instance,
+            &self.device,
+            &self.data,
+            buffer,
+            width,
+            height,
+        )
+    }
+}
+
+unsafe fn update_render_descriptor_sets(device: &Device, data:&AppData) -> Result<()> {
+
+    for i in 0..data.swapchain_images.len() {
+        let info = vk::DescriptorBufferInfo::builder()
+            .buffer(data.uniform_buffers[i])
+            .offset(0)
+            .range(size_of::<UniformBufferObject>() as u64);
+        let buffer_info = &[info];
+        let ubo_write = vk::WriteDescriptorSet::builder()
+            .dst_set(data.descriptor_sets[i])
+            .dst_binding(0)
+            .dst_array_element(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .buffer_info(buffer_info);
+        let info = vk::DescriptorImageInfo::builder()
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            .image_view(data.pipeline_vec[data.pipeline_current_index].vec_image_view[0])
+            .sampler(data.texture_sampler);
+
+        let image_info = &[info];
+        let sampler_write = vk::WriteDescriptorSet::builder()
+            .dst_set(data.descriptor_sets[i])
+            .dst_binding(1)
+            .dst_array_element(0)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .image_info(image_info);
+
+        device.update_descriptor_sets(&[ubo_write, sampler_write], &[] as &[vk::CopyDescriptorSet]);
+    }
+    Ok(())
 }
 
 /// The Vulkan handles and associated properties used by our Vulkan app.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 struct AppData {
     // messenger: vk::DebugUtilsMessengerEXT,
     physical_device: vk::PhysicalDevice,
@@ -408,7 +480,8 @@ struct AppData {
     swapchain: vk::SwapchainKHR,
     render_pass: vk::RenderPass,
     
-    pipeline: vk::Pipeline,
+    pipeline_vec: Vec<EnginePipeline>,
+    pipeline_current_index:usize,
 
     command_pool: vk::CommandPool,
     descriptor_pool: vk::DescriptorPool,
@@ -810,118 +883,6 @@ unsafe fn create_shader_module(device: &Device, bytecode: &[u8]) -> Result<vk::S
     Ok(device.create_shader_module(&info, None)?)
 }
 
-unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
-    let vert = include_bytes!("../assets/ShaderOut/vert.spv");
-    let frag = include_bytes!("../assets/ShaderOut/frag.spv");
-
-    let vert_module = create_shader_module(device, &vert[..])?;
-    let frag_module = create_shader_module(device, &frag[..])?;
-    let vert_stage = vk::PipelineShaderStageCreateInfo::builder()
-        .stage(vk::ShaderStageFlags::VERTEX)
-        .module(vert_module)
-        .name(b"main\0");
-    let frag_stage = vk::PipelineShaderStageCreateInfo::builder()
-        .stage(vk::ShaderStageFlags::FRAGMENT)
-        .module(frag_module)
-        .name(b"main\0");
-    let binding_descriptions = &[Vertex::binding_description()];
-    let attribute_descriptions = Vertex::attribute_descriptions();
-    let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
-        .vertex_binding_descriptions(binding_descriptions)
-        .vertex_attribute_descriptions(&attribute_descriptions);
-
-    let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
-        .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-        .primitive_restart_enable(false);
-    let viewport = vk::Viewport::builder()
-        .x(0.0)
-        .y(0.0)
-        .width(data.swapchain_extent.width as f32)
-        .height(data.swapchain_extent.height as f32)
-        .min_depth(0.0)
-        .max_depth(1.0);
-    let scissor = vk::Rect2D::builder()
-        .offset(vk::Offset2D { x: 0, y: 0 })
-        .extent(data.swapchain_extent);
-    let viewports = &[viewport];
-    let scissors = &[scissor];
-    let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
-        .viewports(viewports)
-        .scissors(scissors);
-    let rasterization_state = vk::PipelineRasterizationStateCreateInfo::builder()
-        .depth_clamp_enable(false)
-        .rasterizer_discard_enable(false)
-        .polygon_mode(vk::PolygonMode::FILL)
-        .line_width(1.0)
-        .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-        .depth_bias_enable(false);
-    let multisample_state = vk::PipelineMultisampleStateCreateInfo::builder()
-        .sample_shading_enable(false)
-        .rasterization_samples(vk::SampleCountFlags::_1);
-    let attachment = vk::PipelineColorBlendAttachmentState::builder()
-        .color_write_mask(vk::ColorComponentFlags::all())
-        .blend_enable(false)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-        .alpha_blend_op(vk::BlendOp::ADD);
-    let attachments = &[attachment];
-    let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-        .logic_op_enable(false)
-        .logic_op(vk::LogicOp::COPY)
-        .attachments(attachments)
-        .blend_constants([1.0, 0.0, 0.0, 0.0]);
-
-    // dynamic states 说明运行时传入，可以不初始化
-    // let dynamic_states = &[
-    //     vk::DynamicState::VIEWPORT,
-    //     vk::DynamicState::LINE_WIDTH,
-    // ];
-    //
-    // let dynamic_state = vk::PipelineDynamicStateCreateInfo::builder()
-    //     .dynamic_states(dynamic_states);
-
-    let set_layouts = &[data.descriptor_set_layout];
-    let layout_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(set_layouts);
-    data.pipeline_layout = device.create_pipeline_layout(&layout_info, None)?;
-
-    let stages = &[vert_stage, frag_stage];
-    let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::builder()
-        .depth_test_enable(true)
-        .depth_write_enable(true)
-        .depth_compare_op(vk::CompareOp::LESS)
-        .depth_bounds_test_enable(false)
-        .min_depth_bounds(0.0) // Optional.
-        .max_depth_bounds(1.0) // Optional.
-        .stencil_test_enable(false);
-    // .front(/* vk::StencilOpState */) // Optional.
-    // .back(/* vk::StencilOpState */); // Optional.
-
-    let info = vk::GraphicsPipelineCreateInfo::builder()
-        .stages(stages)
-        .vertex_input_state(&vertex_input_state)
-        .input_assembly_state(&input_assembly_state)
-        .viewport_state(&viewport_state)
-        .rasterization_state(&rasterization_state)
-        .multisample_state(&multisample_state)
-        .depth_stencil_state(&depth_stencil_state)
-        .color_blend_state(&color_blend_state)
-        .layout(data.pipeline_layout)
-        .render_pass(data.render_pass)
-        .subpass(0);
-    data.pipeline = device
-        .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
-        .0[0];
-
-    device.destroy_shader_module(vert_module, None);
-    device.destroy_shader_module(frag_module, None);
-
-    Ok(())
-}
-
 unsafe fn create_render_pass(
     instance: &Instance,
     device: &Device,
@@ -1024,6 +985,11 @@ unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<
         .level(vk::CommandBufferLevel::PRIMARY)
         .command_buffer_count(data.framebuffers.len() as u32);
     data.command_buffers = device.allocate_command_buffers(&allocate_info)?;
+    Ok(())
+}
+
+unsafe fn bind_render_commands(device: &Device, data: &mut AppData) -> Result<()> {
+
     let render_area = vk::Rect2D::builder()
         .offset(vk::Offset2D::default())
         .extent(data.swapchain_extent);
@@ -1060,14 +1026,14 @@ unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<
         device.cmd_bind_pipeline(
             *command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
-            data.pipeline,
+            data.pipeline_vec[data.pipeline_current_index].pipeline(),
         );
         device.cmd_bind_vertex_buffers(*command_buffer, 0, &[data.vertex_buffer], &[0]);
         device.cmd_bind_index_buffer(*command_buffer, data.index_buffer, 0, vk::IndexType::UINT32);
         device.cmd_bind_descriptor_sets(
             *command_buffer,
             vk::PipelineBindPoint::GRAPHICS,
-            data.pipeline_layout,
+            data.pipeline_vec[data.pipeline_current_index].pipeline_layout,
             0,
             &[data.descriptor_sets[i]],
             &[],
@@ -1077,7 +1043,6 @@ unsafe fn create_command_buffers(device: &Device, data: &mut AppData) -> Result<
         device.cmd_end_render_pass(*command_buffer);
         device.end_command_buffer(*command_buffer)?;
     }
-
     Ok(())
 }
 
@@ -1410,34 +1375,6 @@ unsafe fn create_descriptor_sets(device: &Device, data: &mut AppData) -> Result<
         .descriptor_pool(data.descriptor_pool)
         .set_layouts(&layouts);
     data.descriptor_sets = device.allocate_descriptor_sets(&info)?;
-    for i in 0..data.swapchain_images.len() {
-        let info = vk::DescriptorBufferInfo::builder()
-            .buffer(data.uniform_buffers[i])
-            .offset(0)
-            .range(size_of::<UniformBufferObject>() as u64);
-        let buffer_info = &[info];
-        let ubo_write = vk::WriteDescriptorSet::builder()
-            .dst_set(data.descriptor_sets[i])
-            .dst_binding(0)
-            .dst_array_element(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .buffer_info(buffer_info);
-        let info = vk::DescriptorImageInfo::builder()
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .image_view(data.texture_image_view)
-            .sampler(data.texture_sampler);
-
-        let image_info = &[info];
-        let sampler_write = vk::WriteDescriptorSet::builder()
-            .dst_set(data.descriptor_sets[i])
-            .dst_binding(1)
-            .dst_array_element(0)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .image_info(image_info);
-
-        device.update_descriptor_sets(&[ubo_write, sampler_write], &[] as &[vk::CopyDescriptorSet]);
-    }
-
     Ok(())
 }
 
@@ -1454,9 +1391,31 @@ unsafe fn create_texture_image(
 
     let mut pixels = vec![0; reader.info().raw_bytes()];
     reader.next_frame(&mut pixels)?;
-
     let size = reader.info().raw_bytes() as u64;
     let (width, height) = reader.info().size();
+    (data.texture_image, data.texture_image_memory) = create_texture_image_from_pixel_vec(
+        instance,
+        device,
+        data,
+        &mut pixels,
+        width,
+        height
+    )?;
+
+    Ok(())
+}
+
+
+unsafe fn create_texture_image_from_pixel_vec(
+    instance: &Instance,
+    device: &Device,
+    data: &AppData,
+    pixels: &Vec<u8>,
+    width:u32,
+    height: u32,
+) -> Result<(vk::Image, vk::DeviceMemory)> {
+
+    let size = pixels.len() as u64;
 
     let (staging_buffer, staging_buffer_memory) = create_buffer(
         instance,
@@ -1485,12 +1444,12 @@ unsafe fn create_texture_image(
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
-    data.texture_image = texture_image;
-    data.texture_image_memory = texture_image_memory;
+    let mut texture_image = texture_image;
+    let mut texture_image_memory = texture_image_memory;
     transition_image_layout(
         device,
         data,
-        data.texture_image,
+        texture_image,
         vk::Format::R8G8B8A8_SRGB,
         vk::ImageLayout::UNDEFINED,
         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -1500,20 +1459,20 @@ unsafe fn create_texture_image(
         device,
         data,
         staging_buffer,
-        data.texture_image,
+        texture_image,
         width,
         height,
     )?;
     transition_image_layout(
         device,
         data,
-        data.texture_image,
+        texture_image,
         vk::Format::R8G8B8A8_SRGB,
         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
     )?;
 
-    Ok(())
+    Ok((texture_image, texture_image_memory))
 }
 
 unsafe fn create_image(
@@ -1718,6 +1677,7 @@ unsafe fn create_texture_image_view(device: &Device, data: &mut AppData) -> Resu
 
     Ok(())
 }
+
 
 unsafe fn create_image_view(
     device: &Device,

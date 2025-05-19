@@ -14,6 +14,5 @@ thiserror = "1"
 tobj = { version = "4", features = ["log"] }
 vulkanalia = { version = "=0.28.0", features = ["libloading", "provisional", "window"] }
 winit = "0.29"
-
 #[target.build.macos]
 #rustc-link-search = ["/usr/local/lib"]
