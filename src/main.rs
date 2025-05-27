@@ -24,6 +24,7 @@ use std::mem::size_of;
 use std::os::raw::c_void;
 use std::ptr::copy_nonoverlapping as memcpy;
 use std::time::Instant;
+use cgmath::num_traits::abs;
 use thiserror::Error;
 use vulkanalia::bytecode::Bytecode;
 use vulkanalia::loader::{LibloadingLoader, LIBRARY};
@@ -108,7 +109,7 @@ fn main() -> Result<()> {
             Event::WindowEvent { event, .. } => match event {
                 // Render a frame if our Vulkan app is not being destroyed.
                 WindowEvent::RedrawRequested if !elwt.exiting() && !minimized => {
-                    // unsafe { app.render(&window) }.unwrap()
+                    unsafe { app.render(&window) }.unwrap()
                 }
                 // Destroy our Vulkan app.
                 WindowEvent::CloseRequested => {
@@ -203,7 +204,6 @@ impl <'a>RenderApp {
         create_swapchain(window, &self.instance, &self.device, &mut self.data)?;
         create_swapchain_image_views(&self.device, &mut self.data)?;
         create_render_pass(&self.instance, &self.device, &mut self.data)?;
-        // create_pipeline(&self.device, &mut self.data)?;
         create_uniform_buffers(&self.instance, &self.device, &mut self.data)?;
         create_descriptor_pool(&self.device, &mut self.data)?;
         create_descriptor_sets(&self.device, &mut self.data)?;
@@ -212,6 +212,8 @@ impl <'a>RenderApp {
         self.data
             .images_in_flight
             .resize(self.data.swapchain_images.len(), vk::Fence::null());
+
+        self.create_pipelines()?;
         Ok(())
     }
 
@@ -297,7 +299,7 @@ impl <'a>RenderApp {
     }
 
     unsafe fn create_pipelines(&mut self) -> Result<()> {
-
+        self.data.pipeline_vec.clear();
         let vert = include_bytes!("../assets/ShaderOut/vert.spv");
         let frag = include_bytes!("../assets/ShaderOut/frag.spv");
 
